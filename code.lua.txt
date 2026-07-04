@@ -1,0 +1,616 @@
+loadstring([[
+-- HackerAI Prison Life v3.1 - Mobile Optimized
+-- Menú cuadrado minimizable + burbuja flotante
+-- ==========================================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+local hacks = {
+    aimbot={enabled=false,method="TP Aim",fov=120,autoShoot=false,targetPart="Head"},
+    infiniteAmmo=false,noClip=false,
+    esp={enabled=false},
+    speed={enabled=false,value=25},
+    jump={enabled=false,value=75},
+    antiGravity=false,godMode=false,
+    selectedPlayer=nil
+}
+local espObjects = {}
+local uiOpen = true
+local locations = {
+    ["Prisión"]=Vector3.new(919,98,2305),
+    ["Armería"]=Vector3.new(848,100,2278),
+    ["Azotea"]=Vector3.new(910,130,2320),
+    ["Patio"]=Vector3.new(960,98,2290),
+    ["Helipuerto"]=Vector3.new(890,110,2350),
+    ["Zona Criminales"]=Vector3.new(-500,98,2300)
+}
+
+local function tween(obj,props,dur,s)
+    local t = TweenService:Create(obj,TweenInfo.new(dur or 0.35,s or Enum.EasingStyle.Quad,Enum.EasingDirection.Out),props)
+    t:Play()
+    return t
+end
+
+local function notify(title,text,dur)
+    local g = Instance.new("ScreenGui")
+    g.Name = "HA_Notify"
+    g.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    local b = Instance.new("Frame")
+    b.Size = UDim2.new(0,280,0,50)
+    b.Position = UDim2.new(0.5,-140,0,-80)
+    b.BackgroundColor3 = Color3.fromRGB(10,10,20)
+    b.BorderSizePixel = 0
+    b.BackgroundTransparency = 1
+    b.Parent = g
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0,10)
+    c.Parent = b
+    local l1 = Instance.new("TextLabel")
+    l1.Size = UDim2.new(1,-20,0,22)
+    l1.Position = UDim2.new(0,10,0,4)
+    l1.BackgroundTransparency = 1
+    l1.Text = title
+    l1.TextColor3 = Color3.fromRGB(0,170,255)
+    l1.Font = Enum.Font.GothamBold
+    l1.TextSize = 14
+    l1.TextXAlignment = Enum.TextXAlignment.Left
+    l1.Parent = b
+    local l2 = Instance.new("TextLabel")
+    l2.Size = UDim2.new(1,-20,0,18)
+    l2.Position = UDim2.new(0,10,0,27)
+    l2.BackgroundTransparency = 1
+    l2.Text = text
+    l2.TextColor3 = Color3.fromRGB(170,170,170)
+    l2.Font = Enum.Font.Gotham
+    l2.TextSize = 11
+    l2.TextXAlignment = Enum.TextXAlignment.Left
+    l2.Parent = b
+    tween(b,{BackgroundTransparency=0.1})
+    tween(b,{Position=UDim2.new(0.5,-140,0,20)})
+    task.wait(dur or 2.5)
+    tween(b,{BackgroundTransparency=1,Position=UDim2.new(0.5,-140,0,-80)})
+    task.wait(0.3)
+    g:Destroy()
+end
+
+local function getClosestPlayer()
+    local cd = hacks.aimbot.fov
+    local cp = nil
+    local c = Vector2.new(Camera.ViewportSize.X/2,Camera.ViewportSize.Y/2)
+    for _,p in ipairs(Players:GetPlayers())do
+        if p~=LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart")then
+            local pos,on = Camera:WorldToViewportPoint(p.Character.HumanoidRootPart.Position)
+            if on then
+                local d = (Vector2.new(pos.X,pos.Y)-c).Magnitude
+                if d<cd then cd = d; cp = p end
+            end
+        end
+    end
+    return cp
+end
+
+local function killPlayer(t)
+    if not t then notify("Error","Selecciona un jugador")return end
+    local c = t.Character
+    if not c then notify("Error","Sin personaje")return end
+    local h = c:FindFirstChild("Humanoid")
+    if h then h.Health=0 end
+    local r = c:FindFirstChild("HumanoidRootPart")
+    if r then
+        local e = Instance.new("Explosion")
+        e.BlastRadius=4;e.BlastPressure=0
+        e.Position=r.Position;e.Parent=Workspace
+    end
+    notify("💀 Eliminado",t.Name)
+end
+
+local function tpTo(pos)
+    local c = LocalPlayer.Character
+    if c and c:FindFirstChild("HumanoidRootPart")then
+        c.HumanoidRootPart.CFrame=CFrame.new(pos)
+        notify("📡 TP","Hecho")
+    end
+end
+
+-- ==========================================
+-- CONSTRUCCIÓN DEL MENÚ (CUADRADO, COMPACTO)
+-- ==========================================
+local gui = Instance.new("ScreenGui")
+gui.Name = "HackerAI_Menu"
+gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+gui.ResetOnSpawn = false
+
+-- Fondo oscuro (tap para cerrar)
+local bg = Instance.new("Frame")
+bg.Size = UDim2.new(1,0,1,0)
+bg.BackgroundColor3 = Color3.fromRGB(0,0,0)
+bg.BackgroundTransparency = 0.5
+bg.BorderSizePixel = 0
+bg.Parent = gui
+bg.Visible = false
+bg.Active = true
+bg.MouseButton1Click:Connect(function() end)
+
+-- MENÚ PRINCIPAL (cuadrado 300x430)
+local main = Instance.new("Frame")
+main.Size = UDim2.new(0,300,0,430)
+main.Position = UDim2.new(0.5,-150,0.5,-215)
+main.BackgroundColor3 = Color3.fromRGB(10,10,20)
+main.BorderSizePixel = 0
+main.BackgroundTransparency = 0.05
+main.ClipsDescendants = true
+main.Parent = gui
+local mCorner = Instance.new("UICorner")
+mCorner.CornerRadius = UDim.new(0,16)
+mCorner.Parent = main
+
+-- Barra superior
+local bar = Instance.new("Frame")
+bar.Size = UDim2.new(1,0,0,38)
+bar.BackgroundColor3 = Color3.fromRGB(16,16,30)
+bar.BorderSizePixel = 0
+bar.Parent = main
+local bCorner = Instance.new("UICorner")
+bCorner.CornerRadius = UDim.new(0,16)
+bCorner.Parent = bar
+local bPatch = Instance.new("Frame")
+bPatch.Size = UDim2.new(1,0,0,16)
+bPatch.Position = UDim2.new(0,0,1,-16)
+bPatch.BackgroundColor3 = Color3.fromRGB(16,16,30)
+bPatch.BorderSizePixel = 0
+bPatch.Parent = bar
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(0.6,0,1,0)
+title.Position = UDim2.new(0,12,0,0)
+title.BackgroundTransparency = 1
+title.Text = "HA PRISON"
+title.TextColor3 = Color3.fromRGB(0,170,255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = bar
+
+-- Botón minimizar (─)
+local minBtn = Instance.new("TextButton")
+minBtn.Size = UDim2.new(0,28,0,28)
+minBtn.Position = UDim2.new(1,-68,0,5)
+minBtn.BackgroundColor3 = Color3.fromRGB(255,180,0)
+minBtn.BackgroundTransparency = 0.4
+minBtn.Text = "─"
+minBtn.TextColor3 = Color3.new(1,1,1)
+minBtn.Font = Enum.Font.GothamBold
+minBtn.TextSize = 16
+minBtn.Parent = bar
+local minC = Instance.new("UICorner")
+minC.CornerRadius = UDim.new(0,6)
+minC.Parent = minBtn
+
+-- Botón cerrar (✕)
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0,28,0,28)
+closeBtn.Position = UDim2.new(1,-36,0,5)
+closeBtn.BackgroundColor3 = Color3.fromRGB(255,50,50)
+closeBtn.BackgroundTransparency = 0.4
+closeBtn.Text = "✕"
+closeBtn.TextColor3 = Color3.new(1,1,1)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 16
+closeBtn.Parent = bar
+local closeC = Instance.new("UICorner")
+closeC.CornerRadius = UDim.new(0,6)
+closeC.Parent = closeBtn
+
+-- SCROLLING FRAME (contenido)
+local sf = Instance.new("ScrollingFrame")
+sf.Size = UDim2.new(1,0,1,-38)
+sf.Position = UDim2.new(0,0,0,38)
+sf.BackgroundTransparency = 1
+sf.BorderSizePixel = 0
+sf.ScrollBarThickness = 3
+sf.ScrollBarImageColor3 = Color3.fromRGB(0,170,255)
+sf.CanvasSize = UDim2.new(0,0,0,0)
+sf.Parent = main
+
+local y = 8
+
+local function addCat(text)
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1,-16,0,24)
+    f.Position = UDim2.new(0,8,0,y)
+    f.BackgroundTransparency = 1
+    f.Parent = sf
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(1,0,1,0)
+    l.BackgroundTransparency = 1
+    l.Text = text
+    l.TextColor3 = Color3.fromRGB(0,170,255)
+    l.Font = Enum.Font.GothamBold
+    l.TextSize = 13
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Parent = f
+    y = y + 28
+end
+
+local function addToggle(label,def,cb)
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1,-16,0,36)
+    f.Position = UDim2.new(0,8,0,y)
+    f.BackgroundColor3 = Color3.fromRGB(20,20,36)
+    f.BorderSizePixel = 0
+    f.Parent = sf
+    local fc = Instance.new("UICorner")
+    fc.CornerRadius = UDim.new(0,8)
+    fc.Parent = f
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(0.6,-8,1,0)
+    l.Position = UDim2.new(0,10,0,0)
+    l.BackgroundTransparency = 1
+    l.Text = label
+    l.TextColor3 = Color3.fromRGB(210,210,210)
+    l.Font = Enum.Font.GothamBold
+    l.TextSize = 12
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Parent = f
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0,40,0,22)
+    btn.Position = UDim2.new(1,-48,0,7)
+    btn.BackgroundColor3 = def and Color3.fromRGB(0,180,60) or Color3.fromRGB(50,50,50)
+    btn.Text = def and "ON" or "OFF"
+    btn.TextColor3 = Color3.new(1,1,1)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 10
+    btn.Parent = f
+    local bc = Instance.new("UICorner")
+    bc.CornerRadius = UDim.new(0,5)
+    bc.Parent = btn
+    local st = def
+    btn.MouseButton1Click:Connect(function()
+        st = not st
+        btn.BackgroundColor3 = st and Color3.fromRGB(0,180,60) or Color3.fromRGB(50,50,50)
+        btn.Text = st and "ON" or "OFF"
+        pcall(cb,st)
+    end)
+    y = y + 40
+end
+
+local function addBtn(text,cb)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1,-16,0,34)
+    btn.Position = UDim2.new(0,8,0,y)
+    btn.BackgroundColor3 = Color3.fromRGB(0,85,160)
+    btn.BackgroundTransparency = 0.15
+    btn.Text = text
+    btn.TextColor3 = Color3.new(1,1,1)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 12
+    btn.Parent = sf
+    local bc = Instance.new("UICorner")
+    bc.CornerRadius = UDim.new(0,7)
+    bc.Parent = btn
+    btn.MouseButton1Click:Connect(function()
+        tween(btn,{BackgroundColor3=Color3.fromRGB(0,50,100)},0.06)
+        task.wait(0.06)
+        tween(btn,{BackgroundColor3=Color3.fromRGB(0,85,160)},0.06)
+        pcall(cb)
+    end)
+    y = y + 38
+end
+
+-- ==========================================
+-- CONTENIDO DEL MENÚ
+-- ==========================================
+addCat("⚔️ AIMBOT")
+addToggle("Aimbot",false,function(s)hacks.aimbot.enabled=s end)
+addToggle("Auto Shoot",false,function(s)hacks.aimbot.autoShoot=s end)
+
+addCat("🎯 JUGADORES")
+addBtn("💀 Matar seleccionado",function()killPlayer(hacks.selectedPlayer)end)
+addBtn("📡 TP a jugador",function()
+    if hacks.selectedPlayer and hacks.selectedPlayer.Character and hacks.selectedPlayer.Character:FindFirstChild("HumanoidRootPart")then
+        tpTo(hacks.selectedPlayer.Character.HumanoidRootPart.Position+Vector3.new(0,5,3))
+    else notify("Error","Selecciona un jugador")end
+end)
+
+addCat("📍 LUGARES")
+for n,p in pairs(locations)do addBtn(n,function()tpTo(p)end)end
+
+addCat("⚡ HACKS")
+addToggle("Munición Infinita",false,function(s)hacks.infiniteAmmo=s end)
+addToggle("NoClip",false,function(s)hacks.noClip=s end)
+addToggle("God Mode",false,function(s)hacks.godMode=s end)
+
+addCat("👁️ ESP")
+addToggle("ESP",false,function(s)hacks.esp.enabled=s end)
+
+addCat("🏃 MOVIMIENTO")
+addToggle("Speed",false,function(s)hacks.speed.enabled=s end)
+addToggle("Jump",false,function(s)hacks.jump.enabled=s end)
+addToggle("Anti-Gravity",false,function(s)hacks.antiGravity=s end)
+
+sf.CanvasSize = UDim2.new(0,0,0,y+12)
+
+-- ==========================================
+-- LISTA DE JUGADORES (mini, sincronizada)
+-- ==========================================
+local pGui = Instance.new("ScreenGui")
+pGui.Name = "HA_Players"
+pGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+pGui.ResetOnSpawn = false
+
+local pFrame = Instance.new("Frame")
+pFrame.Size = UDim2.new(0,170,0,260)
+pFrame.Position = UDim2.new(1,-180,0,50)
+pFrame.BackgroundColor3 = Color3.fromRGB(10,10,20)
+pFrame.BorderSizePixel = 0
+pFrame.Parent = pGui
+local pfCorner = Instance.new("UICorner")
+pfCorner.CornerRadius = UDim.new(0,10)
+pfCorner.Parent = pFrame
+
+local pBar = Instance.new("Frame")
+pBar.Size = UDim2.new(1,0,0,30)
+pBar.BackgroundColor3 = Color3.fromRGB(16,16,30)
+pBar.BorderSizePixel = 0
+pBar.Parent = pFrame
+local pbCorner = Instance.new("UICorner")
+pbCorner.CornerRadius = UDim.new(0,10)
+pbCorner.Parent = pBar
+local pbPatch = Instance.new("Frame")
+pbPatch.Size = UDim2.new(1,0,0,10)
+pbPatch.Position = UDim2.new(0,0,1,-10)
+pbPatch.BackgroundColor3 = Color3.fromRGB(16,16,30)
+pbPatch.BorderSizePixel = 0
+pbPatch.Parent = pBar
+
+local pTitle = Instance.new("TextLabel")
+pTitle.Size = UDim2.new(1,-10,1,0)
+pTitle.Position = UDim2.new(0,10,0,0)
+pTitle.BackgroundTransparency = 1
+pTitle.Text = "JUGADORES"
+pTitle.TextColor3 = Color3.fromRGB(0,170,255)
+pTitle.Font = Enum.Font.GothamBold
+pTitle.TextSize = 11
+pTitle.TextXAlignment = Enum.TextXAlignment.Left
+pTitle.Parent = pBar
+
+local pSF = Instance.new("ScrollingFrame")
+pSF.Size = UDim2.new(1,0,1,-30)
+pSF.Position = UDim2.new(0,0,0,30)
+pSF.BackgroundTransparency = 1
+pSF.BorderSizePixel = 0
+pSF.ScrollBarThickness = 2
+pSF.CanvasSize = UDim2.new(0,0,0,0)
+pSF.Parent = pFrame
+
+local function refreshPlayers()
+    for _,c in ipairs(pSF:GetChildren())do if c:IsA("TextButton")then c:Destroy()end end
+    local py = 0
+    for _,p in ipairs(Players:GetPlayers())do
+        if p~=LocalPlayer then
+            local b = Instance.new("TextButton")
+            b.Size = UDim2.new(1,-8,0,28)
+            b.Position = UDim2.new(0,4,0,py)
+            b.BackgroundColor3 = (hacks.selectedPlayer==p)and Color3.fromRGB(0,85,160)or Color3.fromRGB(25,25,40)
+            b.Text = p.Name
+            b.TextColor3 = Color3.fromRGB(200,200,200)
+            b.Font = Enum.Font.GothamBold
+            b.TextSize = 11
+            b.BorderSizePixel = 0
+            b.Parent = pSF
+            local bCorner = Instance.new("UICorner")
+            bCorner.CornerRadius = UDim.new(0,5)
+            bCorner.Parent = b
+            b.MouseButton1Click:Connect(function()
+                hacks.selectedPlayer = p
+                notify("Objetivo",p.Name)
+                refreshPlayers()
+            end)
+            py = py + 32
+        end
+    end
+    pSF.CanvasSize = UDim2.new(0,0,0,py+8)
+end
+refreshPlayers()
+Players.PlayerAdded:Connect(refreshPlayers)
+Players.PlayerRemoving:Connect(refreshPlayers)
+
+-- ==========================================
+-- BURBUJA FLOTANTE (cuando está minimizado)
+-- ==========================================
+local bubble = Instance.new("ScreenGui")
+bubble.Name = "HA_Bubble"
+bubble.Parent = LocalPlayer:WaitForChild("PlayerGui")
+bubble.ResetOnSpawn = false
+
+local bubFrame = Instance.new("Frame")
+bubFrame.Size = UDim2.new(0,50,0,50)
+bubFrame.Position = UDim2.new(0.5,-25,0.85,-25)
+bubFrame.BackgroundColor3 = Color3.fromRGB(0,130,220)
+bubFrame.BorderSizePixel = 0
+bubFrame.BackgroundTransparency = 0.15
+bubFrame.Visible = false
+bubFrame.Parent = bubble
+local bubCorner = Instance.new("UICorner")
+bubCorner.CornerRadius = UDim.new(0,25)
+bubCorner.Parent = bubFrame
+
+-- Sombra de la burbuja
+local bubShadow = Instance.new("Frame")
+bubShadow.Size = UDim2.new(1,4,1,4)
+bubShadow.Position = UDim2.new(0,-2,0,-2)
+bubShadow.BackgroundColor3 = Color3.fromRGB(0,0,0)
+bubShadow.BackgroundTransparency = 0.7
+bubShadow.BorderSizePixel = 0
+bubShadow.ZIndex = -1
+bubShadow.Parent = bubFrame
+local bsCorner = Instance.new("UICorner")
+bsCorner.CornerRadius = UDim.new(0,25)
+bsCorner.Parent = bubShadow
+
+local bubIcon = Instance.new("TextLabel")
+bubIcon.Size = UDim2.new(1,0,1,0)
+bubIcon.BackgroundTransparency = 1
+bubIcon.Text = "⚡"
+bubIcon.TextColor3 = Color3.new(1,1,1)
+bubIcon.Font = Enum.Font.GothamBold
+bubIcon.TextSize = 24
+bubIcon.Parent = bubFrame
+
+local bubBtn = Instance.new("TextButton")
+bubBtn.Size = UDim2.new(1,0,1,0)
+bubBtn.BackgroundTransparency = 1
+bubBtn.Text = ""
+bubBtn.Parent = bubFrame
+
+-- Hacer la burbuja arrastrable
+local dragging, dragStart, bubStartPos
+
+bubBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        bubStartPos = bubFrame.Position
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging then
+        local delta = input.Position - dragStart
+        bubFrame.Position = UDim2.new(bubStartPos.X.Scale, bubStartPos.X.Offset + delta.X, bubStartPos.Y.Scale, bubStartPos.Y.Offset + delta.Y)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+-- ==========================================
+-- CONTROL DE VISIBILIDAD (MENÚ + BURBUJA)
+-- ==========================================
+local function closeAll()
+    uiOpen = false
+    -- Ocultar menú
+    tween(main,{Size=UDim2.new(0,0,0,0),Position=UDim2.new(0.5,0,0.5,0),BackgroundTransparency=1},0.25)
+    bg.Visible = false
+    -- Ocultar lista de players
+    tween(pFrame,{Size=UDim2.new(0,0,0,0),BackgroundTransparency=1},0.25)
+    -- Mostrar burbuja
+    task.wait(0.25)
+    main.Visible = false
+    pFrame.Visible = false
+    bubFrame.Visible = true
+    bubFrame.Size = UDim2.new(0,0,0,0)
+    tween(bubFrame,{Size=UDim2.new(0,50,0,50)},0.3,Enum.EasingStyle.Back)
+end
+
+local function openAll()
+    uiOpen = true
+    -- Ocultar burbuja
+    tween(bubFrame,{Size=UDim2.new(0,0,0,0)},0.2)
+    task.wait(0.2)
+    bubFrame.Visible = false
+    -- Mostrar menú
+    main.Visible = true
+    main.Size = UDim2.new(0,0,0,0)
+    main.Position = UDim2.new(0.5,0,0.5,0)
+    main.BackgroundTransparency = 1
+    tween(main,{Size=UDim2.new(0,300,0,430),Position=UDim2.new(0.5,-150,0.5,-215),BackgroundTransparency=0.05},0.3,Enum.EasingStyle.Back)
+    bg.Visible = true
+    -- Mostrar players
+    pFrame.Visible = true
+    pFrame.Size = UDim2.new(0,0,0,0)
+    pFrame.BackgroundTransparency = 1
+    tween(pFrame,{Size=UDim2.new(0,170,0,260),BackgroundTransparency=0},0.3,Enum.EasingStyle.Back)
+end
+
+-- Conectar botones
+closeBtn.MouseButton1Click:Connect(closeAll)
+minBtn.MouseButton1Click:Connect(closeAll)
+bubBtn.MouseButton1Click:Connect(openAll)
+
+-- Cerrar todo al inicio (muestra burbuja)
+task.wait(0.1)
+main.Visible = false
+pFrame.Visible = false
+bubFrame.Visible = true
+bubFrame.Size = UDim2.new(0,50,0,50)
+
+-- ==========================================
+-- LOOPS PRINCIPALES
+-- ==========================================
+task.spawn(function()
+    RunService.RenderStepped:Connect(function()
+        if hacks.aimbot.enabled then
+            local t = getClosestPlayer()
+            if t and t.Character and t.Character:FindFirstChild("HumanoidRootPart")then
+                local p = t.Character.HumanoidRootPart.Position
+                local h = t.Character:FindFirstChild("Head")
+                if h then p = h.Position end
+                Camera.CFrame = CFrame.new(Camera.CFrame.Position,p)
+            end
+        end
+        if hacks.noClip and LocalPlayer.Character then
+            for _,part in ipairs(LocalPlayer.Character:GetDescendants())do
+                if part:IsA("BasePart")and part.CanCollide then part.CanCollide=false end
+            end
+        end
+    end)
+end)
+
+task.spawn(function()
+    while task.wait(0.3)do
+        local c = LocalPlayer.Character
+        if c then
+            local h = c:FindFirstChild("Humanoid")
+            if h then
+                if hacks.speed.enabled then h.WalkSpeed=hacks.speed.value else h.WalkSpeed=16 end
+                if hacks.jump.enabled then h.JumpPower=hacks.jump.value else h.JumpPower=50 end
+                if hacks.godMode then h.Health=h.MaxHealth end
+            end
+            if hacks.antiGravity then
+                local r = c:FindFirstChild("HumanoidRootPart")
+                if r then r.Velocity=r.Velocity+Vector3.new(0,50,0)end
+            end
+        end
+        -- ESP
+        if hacks.esp.enabled then
+            for _,p in ipairs(Players:GetPlayers())do
+                if p~=LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart")and not espObjects[p]then
+                    local hrp = p.Character.HumanoidRootPart
+                    local b = Instance.new("BoxHandleAdornment")
+                    b.Size=Vector3.new(4,6,2);b.Adornee=hrp
+                    b.AlwaysOnTop=true;b.ZIndex=10;b.Transparency=0.3
+                    b.Color3 = p.TeamColor==LocalPlayer.TeamColor and Color3.fromRGB(0,255,0)or Color3.fromRGB(255,0,0)
+                    b.Parent=hrp
+                    local bg2 = Instance.new("BillboardGui")
+                    bg2.Size=UDim2.new(0,140,0,26);bg2.Adornee=hrp
+                    bg2.AlwaysOnTop=true;bg2.StudsOffset=Vector3.new(0,3.5,0)
+                    bg2.Parent=hrp
+                    local t = Instance.new("TextLabel")
+                    t.Size=UDim2.new(1,0,1,0);t.BackgroundTransparency=1
+                    t.TextColor3=Color3.new(1,1,1);t.TextStrokeColor3=Color3.new(0,0,0)
+                    t.TextStrokeTransparency=0.4;t.Font=Enum.Font.GothamBold;t.TextSize=11
+                    t.Text=p.Name;t.Parent=bg2
+                    espObjects[p]={box=b,billboard=bg2,text=t}
+                end
+            end
+        else
+            for p,esp in pairs(espObjects)do
+                if esp.box then esp.box:Destroy()end
+                if esp.billboard then esp.billboard:Destroy()end
+                espObjects[p]=nil
+            end
+        end
+    end
+end)
+
+notify("🚀 HackerAI","Prison Life v3.1 - Toque la burbuja ⚡")
+]])()
